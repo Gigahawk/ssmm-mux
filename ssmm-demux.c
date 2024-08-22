@@ -5,6 +5,13 @@
 #include <stdint.h>
 #include <inttypes.h>
 
+#ifdef DEBUG
+#define DBG_PRINTF(...) printf(__VA_ARGS__)
+#else
+#define DBG_PRINTF(...)
+#endif
+
+
 uint32_t get_u32_be(uint8_t *buf)
 {
     return (buf[0]<<24) | (buf[1]<<16) | (buf[2]<<8) | buf[3];
@@ -176,7 +183,7 @@ void parse_pack_header(uint8_t * buf) {
     mux_rate |= buf[7] << 6;
     // Program Mux Rate bits [5,0]
     mux_rate |= (buf[8] & 0b11111100) >> 2;
-    printf(
+    DBG_PRINTF(
         "SCR: %u, SCR_ext: %u, Mux rate: %u\n",
         scr, scr_ext, mux_rate
     );
@@ -224,7 +231,7 @@ void parse_system_header(uint8_t * buf, uint16_t header_len) {
 
 
 
-    printf(
+    DBG_PRINTF(
         "rate_bound: %u, audio_bound: %u, fixed_flag: %u, csps_flag: %d, "
         "system_audio_lock_flag: %d, system_video_lock_flag: %d, video_bound: %d, "
         "packet_rate_restriction_flag: %d, streams: %d\n",
@@ -241,7 +248,7 @@ void parse_system_header(uint8_t * buf, uint16_t header_len) {
         p_std_buffer_size_bound |= (buf[idx] & 0b00011111) << 8;
         // P-STD_buffer_bound_scale bits [7,0]
         p_std_buffer_size_bound |= buf[idx + 1];
-        printf(
+        DBG_PRINTF(
             "Stream: %d, P-STD_buffer_bound_scale: %d, P-STD_buffer_size_bound: %d\n",
             stream, p_std_buffer_bound_scale, p_std_buffer_size_bound
         );
@@ -303,7 +310,7 @@ void parse_pes_ext_header(uint8_t * buf) {
 
     pes_header_length = buf[2];
 
-    printf(
+    DBG_PRINTF(
         "PES scrambling control: %d, PES priority: %d, data alignment indicator: %d, "
         "copyright: %d, original: %d, PTS DTS flags: %d, ESCR flag: %d, "
         "ES rate flag: %d, DSM trick mode flag: %d, additional copy info flag: %d, "
@@ -325,7 +332,7 @@ void parse_pes_ext_header(uint8_t * buf) {
         pts |= buf[idx++] << 7;
         // PTS bits [6,0]
         pts |= (buf[idx++] & 0b11111110) >> 1;
-        printf("PTS: %lu, ", pts);
+        DBG_PRINTF("PTS: %lu, ", pts);
     }
     if (pts_dts_flags & 0b01) {
         dts_magic |= (buf[idx] & 0b11110000) >> 4;
@@ -339,46 +346,46 @@ void parse_pes_ext_header(uint8_t * buf) {
         dts |= buf[idx++] << 7;
         // DTS bits [6,0]
         dts |= (buf[idx++] & 0b11111110) >> 1;
-        printf("DTS: %lu, ", dts);
+        DBG_PRINTF("DTS: %lu, ", dts);
     }
     if (pts_dts_flags == 0b10) {
         if (pts_magic != 0b0010) {
-            printf("Error: invalid pts magic %d\n", pts_magic);
+            DBG_PRINTF("Error: invalid pts magic %d\n", pts_magic);
             exit(-1);
         }
     } else if (pts_dts_flags == 0b11) {
         if (pts_magic != 0b0011) {
-            printf("error: invalid pts magic %d\n", pts_magic);
+            DBG_PRINTF("error: invalid pts magic %d\n", pts_magic);
             exit(-1);
         }
         if (dts_magic != 0b0001) {
-            printf("error: invalid dts  magic %d\n", dts_magic);
+            DBG_PRINTF("error: invalid dts  magic %d\n", dts_magic);
             exit(-1);
         }
     } else if (pts_dts_flags == 0b01) {
-        printf("Invalid PTS DTS flags\n");
+        DBG_PRINTF("Invalid PTS DTS flags\n");
         exit(-1);
     }
-    printf("\n");
+    DBG_PRINTF("\n");
 
     // TODO: parse these
     if (escr_flag) {
-        printf("ESCR FLAG ON\n");
+        DBG_PRINTF("ESCR FLAG ON\n");
         exit(-1);
         idx += 6;
     }
     if (es_rate_flag) {
-        printf("ES RATE FLAG ON\n");
+        DBG_PRINTF("ES RATE FLAG ON\n");
         exit(-1);
         idx += 3;
     }
     if (additional_copy_info_flag) {
-        printf("ADDITIONAL COPY INFO FLAG ON\n");
+        DBG_PRINTF("ADDITIONAL COPY INFO FLAG ON\n");
         exit(-1);
         idx += 1;
     }
     if (pes_crc_flag) {
-        printf("CRC FLAG ON\n");
+        DBG_PRINTF("CRC FLAG ON\n");
         exit(-1);
         idx += 2;
     }
@@ -389,7 +396,7 @@ void parse_pes_ext_header(uint8_t * buf) {
         program_packet_sequence_counter_flag = (buf[idx] & 0b00100000) ? 1 : 0;
         p_std_buffer_flag = (buf[idx] & 0b00010000) ? 1 : 0;
         idx++;
-        printf(
+        DBG_PRINTF(
             "PES EXTENSTION: 1, PES private data flag: %d, "
             "pack header field flag: %d, program packet sequence counter flag: %d, "
             "p_std_buffer_flag: %d\n",
@@ -400,18 +407,18 @@ void parse_pes_ext_header(uint8_t * buf) {
     if (pes_private_data_flag) {
         pes_private_data |= buf[idx++] << 8;
         pes_private_data |= buf[idx++];
-        printf("PES Private data: %04X\n", pes_private_data);
+        DBG_PRINTF("PES Private data: %04X\n", pes_private_data);
     }
     if (pack_header_field_flag) {
         pack_field_length = buf[idx++];
-        printf("Pack field length: %d\n", pes_private_data);
+        DBG_PRINTF("Pack field length: %d\n", pes_private_data);
     }
     if (program_packet_sequence_counter_flag) {
         packet_sequence_counter |= (buf[idx++] & 0b01111111) << 1;
         packet_sequence_counter |= (buf[idx] & 0b10000000) >> 7;
         is_mpeg2 = (buf[idx] & 0b01000000) ? 1 : 0;
         original_stuffing_length = buf[idx++] & 0b00111111;
-        printf(
+        DBG_PRINTF(
             "packet sequence counter: %d, is mpeg2: %d, "
             "original_stuffing_length: %d\n",
             packet_sequence_counter, is_mpeg2, original_stuffing_length
@@ -424,7 +431,7 @@ void parse_pes_ext_header(uint8_t * buf) {
         p_std_buffer_size |= (buf[idx] & 0b00011111) << 8;
         // P-STD buffer size bits [7, 0]
         p_std_buffer_size |= buf[idx];
-        printf(
+        DBG_PRINTF(
             "P-STD buffer scale: %d, P-STD buffer size: %d\n",
             p_std_buffer_scale, p_std_buffer_size
         );
@@ -483,33 +490,37 @@ int main(int argc, char *argv[])
         efread(streambuf, 4, pss, pss_path);
         id = get_u32_be(streambuf);
         if (id == 0x000001B9) {
-            printf("Found program end\n");
+            DBG_PRINTF("Found program end\n");
             break;
         }
         efread(streambuf, 2, pss, pss_path);
         packet_size = get_u16_be(streambuf);
         if (id == 0x000001BA) {
-            printf("Found pack header at index %08X\n", file_idx);
+            DBG_PRINTF("Found pack header at index %08X\n", file_idx);
             // First two bytes of pack header isn't packet size,
             // don't overwrite before passing to parser
             efread(streambuf + 2, 7, pss, pss_path);
+#ifdef DEBUG
             parse_pack_header(streambuf);
+#endif
             efread(streambuf, 1, pss, pss_path);
             pack_stuff_len = streambuf[0] & 0b111;
             efseek(pss, pack_stuff_len, SEEK_CUR, pss_path);
         } else if (id == 0x000001BB) {
-            printf("Found system header at index %08X\n", file_idx);
+            DBG_PRINTF("Found system header at index %08X\n", file_idx);
             efread(streambuf, packet_size, pss, pss_path);
+#ifdef DEBUG
             parse_system_header(streambuf, packet_size);
+#endif
         } else if (id == 0x000001BE) {
-            printf("Found padding header at index %08X\n", file_idx);
+            DBG_PRINTF("Found padding header at index %08X\n", file_idx);
             efseek(pss, packet_size, SEEK_CUR, pss_path);
         } else {
             if (0x000001E0 <= id && id <= 0x000001EF) {
-                printf("Found PES video header at index %08X\n", file_idx);
+                DBG_PRINTF("Found PES video header at index %08X\n", file_idx);
                 stream = STREAM_VIDEO;
             } else if (id == 0x000001BD) {
-                printf("Found PES private stream header at index %08X\n", file_idx);
+                DBG_PRINTF("Found PES private stream header at index %08X\n", file_idx);
                 stream = STREAM_PRIVATE;
             } else {
                 printf(
@@ -521,14 +532,16 @@ int main(int argc, char *argv[])
             efread(streambuf, 3, pss, pss_path);
             pes_head_len = streambuf[2];
             efread(streambuf + 3, pes_head_len, pss, pss_path);
+#ifdef DEBUG
             parse_pes_ext_header(streambuf);
+#endif
             data_len = packet_size - pes_head_len - 3;
             efread(streambuf, data_len, pss, pss_path);
             payload_offset = 0;
             if (stream == STREAM_PRIVATE) {
                 ssid = get_u32_be(streambuf);
                 if (ssid == 0xFFA00000) {
-                    printf("Private stream contains SS2 audio\n");
+                    DBG_PRINTF("Private stream contains SS2 audio\n");
                     stream = STREAM_AUDIO;
                     payload_offset = 4;
                 } else {
@@ -548,7 +561,7 @@ int main(int argc, char *argv[])
                 streambuf + payload_offset, data_len,
                 streams[stream].f, streams[stream].path
             );
-            printf("Wrote %d (%04X) bytes\n", data_len, data_len);
+            DBG_PRINTF("Wrote %d (%04X) bytes\n", data_len, data_len);
         }
     }
 
