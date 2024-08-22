@@ -489,6 +489,10 @@ int main(int argc, char *argv[])
         file_idx = ftell(pss);
         efread(streambuf, 4, pss, pss_path);
         id = get_u32_be(streambuf);
+        if (id == 0x00000000) {
+            printf("Warning: found blank header at index %08X\n", file_idx);
+            continue;
+        }
         if (id == 0x000001B9) {
             DBG_PRINTF("Found program end\n");
             break;
