@@ -145,6 +145,293 @@ typedef struct {
 //#define ZOE_SSID_SUBS_DE 0x09
 //#define ZOE_SSID_SUBS_IT 0x0A
 
+void parse_pack_header(uint8_t * buf) {
+    uint32_t scr = 0;
+    uint16_t scr_ext = 0;
+    uint32_t mux_rate = 0;
+
+    // SCR bits [32,30]
+    scr |= ((buf[0] & 0b00111000) >> 3) << 30;
+    // SCR bits [29,28]
+    scr |= (buf[0] & 0b00000011) << 28;
+    // SCR bits [27,20]
+    scr |= buf[1] << 20;
+    // SCR bits [19,15]
+    scr |= ((buf[2] & 0b11111000) >> 3) << 15;
+    // SCR bits [14,13]
+    scr |= (buf[2] & 0b00000011) << 13;
+    // SCR bits [12,5]
+    scr |= buf[3] << 5;
+    // SCR bits [4,0]
+    scr |= (buf[4] & 0b11111000) >> 3;
+
+    // SCR_ext bits [8,7]
+    scr_ext |= (buf[4] & 0b00000011) << 7;
+    // SCR_ext bits [6,0]
+    scr_ext |= (buf[5] & 0b11111110) >> 1;
+
+    // Program Mux Rate bits [21,14]
+    mux_rate |= buf[6] << 14;
+    // Program Mux Rate bits [13,6]
+    mux_rate |= buf[7] << 6;
+    // Program Mux Rate bits [5,0]
+    mux_rate |= (buf[8] & 0b11111100) >> 2;
+    printf(
+        "SCR: %u, SCR_ext: %u, Mux rate: %u\n",
+        scr, scr_ext, mux_rate
+    );
+}
+
+void parse_system_header(uint8_t * buf, uint16_t header_len) {
+    uint32_t rate_bound = 0;
+    uint8_t audio_bound = 0;
+    uint8_t fixed_flag;
+    uint8_t csps_flag;
+    uint8_t system_audio_lock_flag;
+    uint8_t system_video_lock_flag;
+    uint8_t video_bound = 0;
+    uint8_t packet_rate_restriction_flag;
+
+    uint16_t streams_start = 6;
+    uint16_t streams;
+    uint8_t idx;
+    uint8_t p_std_buffer_bound_scale;
+    uint16_t p_std_buffer_size_bound;
+
+
+
+    // Rate bound bits [21,15]
+    rate_bound |= (buf[0] & 0b01111111) << 15;
+    // Rate bound bits [14,7]
+    rate_bound |= buf[1] << 7;
+    // Rate bound bits [6,0]
+    rate_bound |= (buf[2] & 0b11111110) >> 1;
+
+    audio_bound |= (buf[3] & 0b11111100) >> 2;
+
+    fixed_flag = (buf[3] & 0b00000010) ? 1 : 0;
+    csps_flag = (buf[3] & 0b00000001) ? 1 : 0;
+    system_audio_lock_flag = (buf[4] & 0b10000000) ? 1 : 0;
+    system_video_lock_flag = (buf[4] & 0b01000000) ? 1 : 0;
+
+    video_bound |= buf[4] & 0b00011111;
+
+    packet_rate_restriction_flag = (buf[5] & 0b10000000) ? 1 : 0;
+
+    // Seems like there's only 1 stream id 0xE0 (0b11100000)
+    // No support for 24bit long structure (id 0b10110111)
+    streams = (header_len - streams_start) / 2;
+
+
+
+    printf(
+        "rate_bound: %u, audio_bound: %u, fixed_flag: %u, csps_flag: %d, "
+        "system_audio_lock_flag: %d, system_video_lock_flag: %d, video_bound: %d, "
+        "packet_rate_restriction_flag: %d, streams: %d\n",
+        rate_bound, audio_bound, fixed_flag, csps_flag, system_audio_lock_flag,
+        system_video_lock_flag, video_bound, packet_rate_restriction_flag,
+        streams
+    );
+    for (uint8_t stream = 0; stream < streams; stream++) {
+        idx = streams_start + (stream*2);
+        p_std_buffer_bound_scale = (buf[idx] & 0b00100000) ? 1 : 0;
+
+        p_std_buffer_size_bound = 0;
+        // P-STD_buffer_bound_scale bits [12,8]
+        p_std_buffer_size_bound |= (buf[idx] & 0b00011111) << 8;
+        // P-STD_buffer_bound_scale bits [7,0]
+        p_std_buffer_size_bound |= buf[idx + 1];
+        printf(
+            "Stream: %d, P-STD_buffer_bound_scale: %d, P-STD_buffer_size_bound: %d\n",
+            stream, p_std_buffer_bound_scale, p_std_buffer_size_bound
+        );
+    }
+}
+
+void parse_pes_ext_header(uint8_t * buf) {
+    uint8_t pes_scrambling_control = 0;
+    uint8_t pes_priority;
+    uint8_t data_alignment_indicator;
+    uint8_t copyright;
+    uint8_t original;
+    uint8_t pts_dts_flags = 0;
+    uint8_t escr_flag;
+    uint8_t es_rate_flag;
+    uint8_t dsm_trick_mode_flag;
+    uint8_t additional_copy_info_flag;
+    uint8_t pes_crc_flag;
+    uint8_t pes_extension_flag;
+    uint8_t pes_header_length;
+    uint8_t idx = 3;
+
+    uint8_t pts_magic = 0;
+    uint8_t dts_magic = 0;
+    uint64_t pts = 0;
+    uint64_t dts = 0;
+
+    uint8_t pes_private_data_flag = 0;
+    uint8_t pack_header_field_flag = 0;
+    uint8_t program_packet_sequence_counter_flag = 0;
+    uint8_t p_std_buffer_flag = 0;
+    // Note PS2 doesn't support PES extension flag 2
+
+    uint16_t pes_private_data;
+
+    uint8_t pack_field_length;
+
+    uint8_t packet_sequence_counter = 0;
+    uint8_t is_mpeg2;
+    uint8_t original_stuffing_length;
+
+
+    uint8_t p_std_buffer_scale;
+    uint8_t p_std_buffer_size;
+
+    pes_scrambling_control = (buf[0] & 0b00110000) >> 4;
+    pes_priority = (buf[0] & 0b00001000) ? 1 : 0;
+    data_alignment_indicator = (buf[0] & 0b00000100) ? 1 : 0;
+    copyright = (buf[0] & 0b00000010) ? 1 : 0;
+    original = (buf[0] & 0b00000001) ? 1 : 0;
+
+    pts_dts_flags = (buf[1] & 0b11000000) >> 6;
+    escr_flag = (buf[1] & 0b00100000) ? 1 : 0;
+    es_rate_flag = (buf[1] & 0b00010000) ? 1 : 0;
+    dsm_trick_mode_flag = (buf[1] & 0b00001000) ? 1 : 0;
+    additional_copy_info_flag = (buf[1] & 0b00000100) ? 1 : 0;
+    pes_crc_flag = (buf[1] & 0b00000010) ? 1 : 0;
+    pes_extension_flag = (buf[1] & 0b00000001) ? 1 : 0;
+
+    pes_header_length = buf[2];
+
+    printf(
+        "PES scrambling control: %d, PES priority: %d, data alignment indicator: %d, "
+        "copyright: %d, original: %d, PTS DTS flags: %d, ESCR flag: %d, "
+        "ES rate flag: %d, DSM trick mode flag: %d, additional copy info flag: %d, "
+        "PES CRC flag: %d, PES extension flag: %d, PES header length: %d\n",
+        pes_scrambling_control, pes_priority, data_alignment_indicator, copyright,
+        original, pts_dts_flags, escr_flag, es_rate_flag, dsm_trick_mode_flag,
+        additional_copy_info_flag, pes_crc_flag, pes_extension_flag, pes_header_length
+    );
+
+    if (pts_dts_flags & 0b10) {
+        pts_magic |= (buf[idx] & 0b11110000) >> 4;
+        // PTS bits [32,30]
+        pts |= ((buf[idx++] & 0b00001110) >> 1) << 30;
+        // PTS bits [29,22]
+        pts |= buf[idx++] << 22;
+        // PTS bits [21,15]
+        pts |= ((buf[idx++] & 0b11111110) >> 1) << 15;
+        // PTS bits [14,7]
+        pts |= buf[idx++] << 7;
+        // PTS bits [6,0]
+        pts |= (buf[idx++] & 0b11111110) >> 1;
+        printf("PTS: %lu, ", pts);
+    }
+    if (pts_dts_flags & 0b01) {
+        dts_magic |= (buf[idx] & 0b11110000) >> 4;
+        // DTS bits [32,30]
+        dts |= ((buf[idx++] & 0b00001110) >> 1) << 30;
+        // DTS bits [29,22]
+        dts |= buf[idx++] << 22;
+        // DTS bits [21,15]
+        dts |= ((buf[idx++] & 0b11111110) >> 1) << 15;
+        // DTS bits [14,7]
+        dts |= buf[idx++] << 7;
+        // DTS bits [6,0]
+        dts |= (buf[idx++] & 0b11111110) >> 1;
+        printf("DTS: %lu, ", dts);
+    }
+    if (pts_dts_flags == 0b10) {
+        if (pts_magic != 0b0010) {
+            printf("Error: invalid pts magic %d\n", pts_magic);
+            exit(-1);
+        }
+    } else if (pts_dts_flags == 0b11) {
+        if (pts_magic != 0b0011) {
+            printf("error: invalid pts magic %d\n", pts_magic);
+            exit(-1);
+        }
+        if (dts_magic != 0b0001) {
+            printf("error: invalid dts  magic %d\n", dts_magic);
+            exit(-1);
+        }
+    } else if (pts_dts_flags == 0b01) {
+        printf("Invalid PTS DTS flags\n");
+        exit(-1);
+    }
+    printf("\n");
+
+    // TODO: parse these
+    if (escr_flag) {
+        printf("ESCR FLAG ON\n");
+        exit(-1);
+        idx += 6;
+    }
+    if (es_rate_flag) {
+        printf("ES RATE FLAG ON\n");
+        exit(-1);
+        idx += 3;
+    }
+    if (additional_copy_info_flag) {
+        printf("ADDITIONAL COPY INFO FLAG ON\n");
+        exit(-1);
+        idx += 1;
+    }
+    if (pes_crc_flag) {
+        printf("CRC FLAG ON\n");
+        exit(-1);
+        idx += 2;
+    }
+
+    if (pes_extension_flag) {
+        pes_private_data_flag = (buf[idx] & 0b10000000) ? 1 : 0;
+        pack_header_field_flag = (buf[idx] & 0b01000000) ? 1 : 0;
+        program_packet_sequence_counter_flag = (buf[idx] & 0b00100000) ? 1 : 0;
+        p_std_buffer_flag = (buf[idx] & 0b00010000) ? 1 : 0;
+        idx++;
+        printf(
+            "PES EXTENSTION: 1, PES private data flag: %d, "
+            "pack header field flag: %d, program packet sequence counter flag: %d, "
+            "p_std_buffer_flag: %d\n",
+            pes_private_data_flag, pack_header_field_flag,
+            program_packet_sequence_counter_flag, p_std_buffer_flag
+        );
+    }
+    if (pes_private_data_flag) {
+        pes_private_data |= buf[idx++] << 8;
+        pes_private_data |= buf[idx++];
+        printf("PES Private data: %04X\n", pes_private_data);
+    }
+    if (pack_header_field_flag) {
+        pack_field_length = buf[idx++];
+        printf("Pack field length: %d\n", pes_private_data);
+    }
+    if (program_packet_sequence_counter_flag) {
+        packet_sequence_counter |= (buf[idx++] & 0b01111111) << 1;
+        packet_sequence_counter |= (buf[idx] & 0b10000000) >> 7;
+        is_mpeg2 = (buf[idx] & 0b01000000) ? 1 : 0;
+        original_stuffing_length = buf[idx++] & 0b00111111;
+        printf(
+            "packet sequence counter: %d, is mpeg2: %d, "
+            "original_stuffing_length: %d\n",
+            packet_sequence_counter, is_mpeg2, original_stuffing_length
+        );
+    }
+
+    if (p_std_buffer_flag) {
+        p_std_buffer_scale = (buf[idx] & 0b00100000) ? 1 : 0;
+        // P-STD buffer size bits [12, 8]
+        p_std_buffer_size |= (buf[idx] & 0b00011111) << 8;
+        // P-STD buffer size bits [7, 0]
+        p_std_buffer_size |= buf[idx];
+        printf(
+            "P-STD buffer scale: %d, P-STD buffer size: %d\n",
+            p_std_buffer_scale, p_std_buffer_size
+        );
+    }
+
+}
+
 int main(int argc, char *argv[])
 {
     FILE     *pss                 = NULL;
@@ -202,24 +489,27 @@ int main(int argc, char *argv[])
         efread(streambuf, 2, pss, pss_path);
         packet_size = get_u16_be(streambuf);
         if (id == 0x000001BA) {
-            printf("Found pack header\n");
-            // Seek past all the fixed length info
-            efseek(pss, 7, SEEK_CUR, pss_path);
+            printf("Found pack header at index %08X\n", file_idx);
+            // First two bytes of pack header isn't packet size,
+            // don't overwrite before passing to parser
+            efread(streambuf + 2, 7, pss, pss_path);
+            parse_pack_header(streambuf);
             efread(streambuf, 1, pss, pss_path);
             pack_stuff_len = streambuf[0] & 0b111;
             efseek(pss, pack_stuff_len, SEEK_CUR, pss_path);
         } else if (id == 0x000001BB) {
-            printf("Found system header\n");
-            efseek(pss, packet_size, SEEK_CUR, pss_path);
+            printf("Found system header at index %08X\n", file_idx);
+            efread(streambuf, packet_size, pss, pss_path);
+            parse_system_header(streambuf, packet_size);
         } else if (id == 0x000001BE) {
-            printf("Found padding header\n");
+            printf("Found padding header at index %08X\n", file_idx);
             efseek(pss, packet_size, SEEK_CUR, pss_path);
         } else {
             if (0x000001E0 <= id && id <= 0x000001EF) {
-                printf("Found PES video header\n");
+                printf("Found PES video header at index %08X\n", file_idx);
                 stream = STREAM_VIDEO;
             } else if (id == 0x000001BD) {
-                printf("Found PES private stream header\n");
+                printf("Found PES private stream header at index %08X\n", file_idx);
                 stream = STREAM_PRIVATE;
             } else {
                 printf(
@@ -228,10 +518,10 @@ int main(int argc, char *argv[])
                 );
                 exit(-1);
             }
-            efseek(pss, 2, SEEK_CUR, pss_path);
-            efread(streambuf, 1, pss, pss_path);
-            pes_head_len = streambuf[0];
-            efseek(pss, pes_head_len, SEEK_CUR, pss_path);
+            efread(streambuf, 3, pss, pss_path);
+            pes_head_len = streambuf[2];
+            efread(streambuf + 3, pes_head_len, pss, pss_path);
+            parse_pes_ext_header(streambuf);
             data_len = packet_size - pes_head_len - 3;
             efread(streambuf, data_len, pss, pss_path);
             payload_offset = 0;
@@ -249,14 +539,16 @@ int main(int argc, char *argv[])
                     exit(-1);
                 }
             }
+            data_len -= payload_offset;
             if (streams[stream].f == NULL) {
                 streams[stream].path = subext(pss_path, stream_names[stream]);
                 efopen(&streams[stream].f, streams[stream].path, "w+b");
             }
             efwrite(
-                streambuf + payload_offset, data_len - payload_offset,
+                streambuf + payload_offset, data_len,
                 streams[stream].f, streams[stream].path
             );
+            printf("Wrote %d (%04X) bytes\n", data_len, data_len);
         }
     }
 
