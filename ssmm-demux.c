@@ -443,6 +443,7 @@ int main(int argc, char *argv[])
 {
     FILE     *pss                 = NULL;
     char     *pss_path            = NULL;
+    char     *output_path         = NULL;
     long int pss_size             = 0;
     stream_t streams[STREAMS_MAX] = {0};
     uint8_t  stream               = 0;
@@ -458,9 +459,15 @@ int main(int argc, char *argv[])
 
     uint32_t file_idx             = 0;
 
-    if (argc != 2) {
-        printf("usage: %s <pss>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        printf("usage: %s <pss> [<output>]\n", argv[0]);
         return 1;
+    }
+
+    if (argc == 3) {
+        output_path = argv[2];
+    } else {
+        output_path = argv[1];
     }
 
     pss_path = argv[1];
@@ -558,7 +565,7 @@ int main(int argc, char *argv[])
             }
             data_len -= payload_offset;
             if (streams[stream].f == NULL) {
-                streams[stream].path = subext(pss_path, stream_names[stream]);
+                streams[stream].path = subext(output_path, stream_names[stream]);
                 efopen(&streams[stream].f, streams[stream].path, "w+b");
             }
             efwrite(
